@@ -8,6 +8,6 @@ The validator <b>Y</b> is a state machine and increases a counter id after each 
 
 The actual mint happens in a seperate minting policy <b>Z</b>. The mint only happens if the state machine <b>Y</b> successfully transitioned and the token name includes the correct counter id.
 
-After burning the thread token no more NFTs can be minted. The supply can also be capped regardless of the tread token still in existence or not.
+After burning the thread token no more NFTs can be minted. The supply can also be capped regardless of the tread token being still in existence or not.
 
 The NFTs can be natively burnt.
