@@ -108,9 +108,6 @@ mkTokenValidator validatorData count action ctx = txInfo `txSignedBy` (vdOwner v
         txInfo :: TxInfo
         txInfo = scriptContextTxInfo ctx
 
-        txPurpose :: ScriptPurpose
-        txPurpose = scriptContextPurpose ctx
-
         outValue :: Value
         nextCount :: Integer
         (outValue, nextCount) = case getContinuingOutputs ctx of
