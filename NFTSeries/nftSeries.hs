@@ -33,23 +33,28 @@ mkTokenPolicy :: TokenData -> Action -> ScriptContext -> Bool
 mkTokenPolicy tokenData action ctx = case action of
     Mint -> checkMint
     Burn -> checkBurn
-    
     where
-        txInfo :: TxInfo
-        txInfo = scriptContextTxInfo ctx
-
         checkMint :: Bool
-        checkMint = let [(cs,tn,am)] = flattenValue (txInfoMint txInfo) in cs == ownCurrencySymbol ctx && tn == TokenName (tdName tokenData P.<> integerToByteString count) && am == 1
+        checkMint = check flattenMint count
+            where
+                check [] _ = True
+                check ((cs,tn,am):t) n = ownCurrencySymbol ctx == cs && tn == TokenName (tdName tokenData P.<> integerToByteString n) && am == 1 && check t (n+1)
 
         checkBurn :: Bool
         checkBurn = all (\(cs,_,am) -> cs == ownCurrencySymbol ctx && am == -1) (flattenValue (txInfoMint txInfo))
+
+        txInfo :: TxInfo
+        txInfo = scriptContextTxInfo ctx
+
+        flattenMint :: [(CurrencySymbol, TokenName, Integer)]
+        flattenMint = flattenValue (txInfoMint txInfo)
 
         count :: Integer
         count = let [(h, v)] = scriptOutputsAt (tdValidatorHash tokenData) txInfo in
             case findDatum h txInfo of
                 Just (Datum d) -> case PlutusTx.fromBuiltinData d of
                         Just c -> case let [(cs,_,am)] = flattenValue v in cs == tdThreadSymbol tokenData && am == 1 of -- expects script output to contain thread token
-                            True ->  c - 1 -- 1 needs to be subtraced, since this is the value of the next count
+                            True ->  c - length flattenMint -- needs to be subtraced, since this c is the value of the next count
 
         integerToByteString :: Integer -> BuiltinByteString
         integerToByteString n
@@ -88,15 +93,17 @@ mkTokenValidator validatorData count action ctx = txInfo `txSignedBy` (vdOwner v
     Mint -> checkSupply && checkOutput
     Burn -> checkBurn
     where
-
         checkSupply :: Bool
         checkSupply = count < vdMaxSupply validatorData || vdMaxSupply validatorData == -1
 
         checkOutput :: Bool
-        checkOutput = let [(cs,_,am)] = flattenValue outValue in cs == vdThreadSymbol validatorData && am == 1 && nextCount == count + 1
+        checkOutput = let [(cs,_,am)] = flattenValue outValue in cs == vdThreadSymbol validatorData && am == 1 && nextCount == count + length flattenMint
 
         checkBurn :: Bool
-        checkBurn = let [(cs,_,am)] = flattenValue (txInfoMint txInfo) in cs == vdThreadSymbol validatorData && am == -1
+        checkBurn = let [(cs,_,am)] = flattenMint in cs == vdThreadSymbol validatorData && am == -1
+
+        flattenMint :: [(CurrencySymbol, TokenName, Integer)]
+        flattenMint = flattenValue (txInfoMint txInfo)
 
         txInfo :: TxInfo
         txInfo = scriptContextTxInfo ctx
@@ -111,6 +118,7 @@ mkTokenValidator validatorData count action ctx = txInfo `txSignedBy` (vdOwner v
                 Just h -> case findDatum h txInfo of 
                    Just (Datum d) -> case PlutusTx.fromBuiltinData d of
                         Just c -> (txOutValue o, c)
+
 
 threadPolicy :: ThreadData -> Scripts.MintingPolicy
 threadPolicy threadData = mkMintingPolicyScript $
@@ -219,7 +227,26 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
             Constraints.mustPayToTheScript (count+1) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
 
-    -- next with id 2, then id 3 and so on...
+    -- wait 1 slot
+    slot <- currentSlot
+    _ <- awaitSlot (slot+1)
+
+    -- batch mint NFT with id 2, id 3 
+    utxos <- utxoAt (tokenValidatorAddress validatorData)
+    let count = let [(_,o)] = Map.toList utxos in getCount o
+        tn0 = TokenName (unTokenName mpName <> toBuiltin (C.pack (Haskell.show count)))
+        tn1 = TokenName (unTokenName mpName <> toBuiltin (C.pack (Haskell.show (count+1))))
+        cs = scriptCurrencySymbol $ tokenPolicy tokenData
+        value = Value.singleton cs tn0 1 <> Value.singleton cs tn1 1
+        lookups = Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
+                Constraints.mintingPolicy (tokenPolicy tokenData) <>
+                Constraints.unspentOutputs utxos
+        tx = collectFromScript utxos Mint <> 
+            Constraints.mustMintValue value <> 
+            Constraints.mustPayToTheScript (count+2) threadValue
+    void $ submitTxConstraintsWith @TokenValidator lookups tx
+
+    -- mint next id 4, id 5, and so on...
 
     -- wait 1 slot
     slot <- currentSlot
