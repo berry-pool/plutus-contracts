@@ -271,8 +271,8 @@ PlutusTx.makeIsDataIndexed ''TokenData [('TokenData,0)]
 PlutusTx.makeLift ''ThreadData
 PlutusTx.makeIsDataIndexed ''ThreadData [('ThreadData,0)]
 
-PlutusTx.unstableMakeIsData ''Action
 PlutusTx.makeLift ''Action
+PlutusTx.makeIsDataIndexed ''Action [('Mint,0),('Burn,1)]
 
 
 contract :: AsContractError e => Contract () MintSchema e ()
