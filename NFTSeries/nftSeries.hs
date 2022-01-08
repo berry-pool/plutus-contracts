@@ -18,11 +18,9 @@ import           Data.Map             as Map
 import qualified Ledger.Ada            as Ada
 import           Data.Void              (Void)
 import           Plutus.Contract        as Contract
-import           Plutus.V1.Ledger.Address
 import           Ledger.Constraints.TxConstraints
 import           Ledger.Tx
 import           Plutus.ChainIndex.Tx
-import           Control.Lens
 
 data ValidatorData = ValidatorData {vdOwner :: !PaymentPubKeyHash, vdMaxSupply :: !Integer, vdThreadSymbol :: !CurrencySymbol}
 
@@ -74,7 +72,7 @@ mkTokenPolicy tokenData action ctx = case action of
             | n == 8 = "8"
             | n == 9 = "9"
             | otherwise = integerToByteString (n `P.divide` 10) P.<> integerToByteString (n `P.modulo` 10)
-
+    
 -- the policy that mints a single token in order to initialize the state machine of the validator (thread token)
 mkThreadPolicy :: ThreadData -> Action -> ScriptContext -> Bool
 mkThreadPolicy threadData action ctx = case action of
@@ -94,7 +92,7 @@ mkThreadPolicy threadData action ctx = case action of
 
 -- the validator script that keeps track of the NFT supply and increments the mint id
 mkTokenValidator :: ValidatorData -> Integer -> Action -> ScriptContext -> Bool
-mkTokenValidator validatorData count action ctx =  Ledger.Constraints.TxConstraints.isSatisfiable (Constraints.mustBeSignedBy (vdOwner validatorData)) && case action of
+mkTokenValidator validatorData count action ctx =  isSatisfiable (mustBeSignedBy (vdOwner validatorData)) && case action of
     Main.Mint -> checkSupply && checkOutput
     Burn -> checkBurn
     where
@@ -117,7 +115,7 @@ mkTokenValidator validatorData count action ctx =  Ledger.Constraints.TxConstrai
         nextCount :: Integer
         (outValue, nextCount) = case getContinuingOutputs ctx of
             [o] -> case txOutDatum o of
-                Just h -> case findDatum h txInfo of
+                Just h -> case findDatum h txInfo of 
                    Just (Datum d) -> case PlutusTx.fromBuiltinData d of
                         Just c -> (txOutValue o, c)
 
@@ -125,13 +123,13 @@ mkTokenValidator validatorData count action ctx =  Ledger.Constraints.TxConstrai
 threadPolicy :: ThreadData -> Scripts.MintingPolicy
 threadPolicy threadData = mkMintingPolicyScript $
     $$(PlutusTx.compile [|| wrap ||]) `PlutusTx.applyCode` PlutusTx.liftCode threadData
-    where
+    where 
         wrap threadData = Scripts.wrapMintingPolicy $ mkThreadPolicy threadData
-
+    
 tokenPolicy :: TokenData -> Scripts.MintingPolicy
 tokenPolicy tokenData = mkMintingPolicyScript $
     $$(PlutusTx.compile [|| wrap ||]) `PlutusTx.applyCode` PlutusTx.liftCode tokenData
-    where
+    where 
         wrap tokenData = Scripts.wrapMintingPolicy $ mkTokenPolicy tokenData
 
 threadSymbol :: ThreadData -> CurrencySymbol
@@ -160,7 +158,7 @@ tokenValidatorInstance validatorData = Scripts.mkTypedValidator @TokenValidator
 type MintSchema = Endpoint "simulate" MintParams
 
 data MintParams = MintParams
-    { mpMaxSupply  :: Integer
+    { mpMaxSupply  :: Integer 
     , mpName     :: TokenName
     }
     deriving stock (Haskell.Eq, Haskell.Show, Generic)
@@ -185,9 +183,9 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         validatorData = ValidatorData {vdOwner = pkh, vdMaxSupply = mpMaxSupply, vdThreadSymbol = cs}
         tokenData = TokenData {tdName = unTokenName mpName, tdValidatorHash = vh, tdThreadSymbol = cs}
 
-        lookups = Constraints.mintingPolicy (threadPolicy threadData) <>
+        lookups = Constraints.mintingPolicy (threadPolicy threadData) <> 
                 Constraints.unspentOutputs utxos
-        tx = Constraints.mustSpendPubKeyOutput oref <> Constraints.mustMintValueWithRedeemer (Redeemer (PlutusTx.toBuiltinData Main.Mint)) threadValue <>
+        tx = Constraints.mustSpendPubKeyOutput oref <> Constraints.mustMintValueWithRedeemer (Redeemer (PlutusTx.toBuiltinData Main.Mint)) threadValue <> 
             Constraints.mustPayToOtherScript vh (Datum (PlutusTx.toBuiltinData (0 :: Integer))) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
 
@@ -206,8 +204,8 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         lookups = Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
                 Constraints.mintingPolicy (tokenPolicy tokenData) <>
                 Constraints.unspentOutputs simpleutxos
-        tx = collectFromScript simpleutxos Main.Mint <>
-            Constraints.mustMintValue value <>
+        tx = collectFromScript simpleutxos Main.Mint <> 
+            Constraints.mustMintValue value <> 
             Constraints.mustPayToTheScript (count+1) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
 
@@ -226,8 +224,8 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         lookups = Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
                 Constraints.mintingPolicy (tokenPolicy tokenData) <>
                 Constraints.unspentOutputs simpleutxos
-        tx = collectFromScript simpleutxos Main.Mint <>
-            Constraints.mustMintValue value <>
+        tx = collectFromScript simpleutxos Main.Mint <> 
+            Constraints.mustMintValue value <> 
             Constraints.mustPayToTheScript (count+1) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
 
@@ -235,7 +233,7 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
     slot <- currentSlot
     _ <- awaitSlot (slot+1)
 
-    -- batch mint NFT with id 2, id 3
+    -- batch mint NFT with id 2, id 3 
     simpleutxos <- utxosAt(tokenValidatorAddress validatorData)
     utxos <- utxosTxOutTxAt (tokenValidatorAddress validatorData)
     let count = let [(_,o)] = Map.toList utxos in getCount o
@@ -246,8 +244,8 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         lookups = Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
                 Constraints.mintingPolicy (tokenPolicy tokenData) <>
                 Constraints.unspentOutputs simpleutxos
-        tx = collectFromScript simpleutxos Main.Mint <>
-            Constraints.mustMintValue value <>
+        tx = collectFromScript simpleutxos Main.Mint <> 
+            Constraints.mustMintValue value <> 
             Constraints.mustPayToTheScript (count+2) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
 
@@ -261,10 +259,10 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
     utxos <- utxosAt (tokenValidatorAddress validatorData)
     let cs = threadSymbol threadData
         threadValue = Value.singleton cs (thName threadData) (-1)
-        lookups = Constraints.mintingPolicy (threadPolicy threadData) <>
+        lookups = Constraints.mintingPolicy (threadPolicy threadData) <> 
                 Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
                 Constraints.unspentOutputs utxos
-        tx = collectFromScript utxos Burn <> Constraints.mustMintValueWithRedeemer (Redeemer (PlutusTx.toBuiltinData Burn)) threadValue
+        tx = collectFromScript utxos Burn <> Constraints.mustMintValueWithRedeemer (Redeemer (PlutusTx.toBuiltinData Burn)) threadValue 
     void $ submitTxConstraintsWith @TokenValidator lookups tx
 
     -- wait 1 slot
@@ -277,7 +275,7 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         tn0 = TokenName (unTokenName mpName <> toBuiltin (C.pack (Haskell.show 0)))
         tn1 = TokenName (unTokenName mpName <> toBuiltin (C.pack (Haskell.show 1)))
         value = Value.singleton cs tn0 (-1) <> Value.singleton cs tn1 (-1)
-        lookups = Constraints.mintingPolicy (tokenPolicy tokenData) <>
+        lookups = Constraints.mintingPolicy (tokenPolicy tokenData) <> 
                 Constraints.unspentOutputs utxos
         tx = Constraints.mustMintValueWithRedeemer (Redeemer (PlutusTx.toBuiltinData Burn)) value
     void $ submitTxConstraintsWith @TokenValidator lookups tx
