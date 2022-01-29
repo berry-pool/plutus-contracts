@@ -18,9 +18,11 @@ import           Data.Map             as Map
 import qualified Ledger.Ada            as Ada
 import           Data.Void              (Void)
 import           Plutus.Contract        as Contract
+import           Plutus.V1.Ledger.Address
 import           Ledger.Constraints.TxConstraints
-import           Ledger.Tx           hiding (Mint, mint)
+import           Ledger.Tx
 import           Plutus.ChainIndex.Tx
+import           Control.Lens 
 
 data ValidatorData = ValidatorData {vdOwner :: !PaymentPubKeyHash, vdMaxSupply :: !Integer, vdThreadSymbol :: !CurrencySymbol}
 
@@ -34,7 +36,7 @@ data Action = Mint | Burn
 -- the policy script that actually represents the NFT policy
 mkTokenPolicy :: TokenData -> Action -> ScriptContext -> Bool
 mkTokenPolicy tokenData action ctx = case action of
-    Mint -> checkMint
+    Main.Mint -> checkMint
     Burn -> checkBurn
     where
         checkMint :: Bool
@@ -76,7 +78,7 @@ mkTokenPolicy tokenData action ctx = case action of
 -- the policy that mints a single token in order to initialize the state machine of the validator (thread token)
 mkThreadPolicy :: ThreadData -> Action -> ScriptContext -> Bool
 mkThreadPolicy threadData action ctx = case action of
-    Mint -> hasUtxo && checkMint 1
+    Main.Mint -> hasUtxo && checkMint 1
     Burn -> checkMint (-1)
   where
     txInfo :: TxInfo
@@ -92,10 +94,13 @@ mkThreadPolicy threadData action ctx = case action of
 
 -- the validator script that keeps track of the NFT supply and increments the mint id
 mkTokenValidator :: ValidatorData -> Integer -> Action -> ScriptContext -> Bool
-mkTokenValidator validatorData count action ctx =  isSatisfiable (mustBeSignedBy (vdOwner validatorData)) && case action of
-    Mint -> checkSupply && checkOutput
+mkTokenValidator validatorData count action ctx =  signedByOwner && case action of
+    Main.Mint -> checkSupply && checkOutput
     Burn -> checkBurn
     where
+        signedByOwner:: Bool
+        signedByOwner = txSignedBy (scriptContextTxInfo ctx) $ unPaymentPubKeyHash $ (vdOwner validatorData)
+
         checkSupply :: Bool
         checkSupply = count < vdMaxSupply validatorData || vdMaxSupply validatorData == -1
 
@@ -185,7 +190,7 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
 
         lookups = Constraints.mintingPolicy (threadPolicy threadData) <> 
                 Constraints.unspentOutputs utxos
-        tx = Constraints.mustSpendPubKeyOutput oref <> Constraints.mustMintValueWithRedeemer (Redeemer (PlutusTx.toBuiltinData Mint)) threadValue <> 
+        tx = Constraints.mustSpendPubKeyOutput oref <> Constraints.mustMintValueWithRedeemer (Redeemer (PlutusTx.toBuiltinData Main.Mint)) threadValue <> 
             Constraints.mustPayToOtherScript vh (Datum (PlutusTx.toBuiltinData (0 :: Integer))) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
 
@@ -204,7 +209,7 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         lookups = Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
                 Constraints.mintingPolicy (tokenPolicy tokenData) <>
                 Constraints.unspentOutputs simpleutxos
-        tx = collectFromScript simpleutxos Mint <> 
+        tx = collectFromScript simpleutxos Main.Mint <> 
             Constraints.mustMintValue value <> 
             Constraints.mustPayToTheScript (count+1) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
@@ -224,7 +229,7 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         lookups = Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
                 Constraints.mintingPolicy (tokenPolicy tokenData) <>
                 Constraints.unspentOutputs simpleutxos
-        tx = collectFromScript simpleutxos Mint <> 
+        tx = collectFromScript simpleutxos Main.Mint <> 
             Constraints.mustMintValue value <> 
             Constraints.mustPayToTheScript (count+1) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
@@ -244,7 +249,7 @@ simulate = endpoint @"simulate" @MintParams $ \(MintParams{..}) -> do
         lookups = Constraints.typedValidatorLookups (tokenValidatorInstance validatorData) <>
                 Constraints.mintingPolicy (tokenPolicy tokenData) <>
                 Constraints.unspentOutputs simpleutxos
-        tx = collectFromScript simpleutxos Mint <> 
+        tx = collectFromScript simpleutxos Main.Mint <> 
             Constraints.mustMintValue value <> 
             Constraints.mustPayToTheScript (count+2) threadValue
     void $ submitTxConstraintsWith @TokenValidator lookups tx
@@ -302,7 +307,7 @@ PlutusTx.makeLift ''ThreadData
 PlutusTx.makeIsDataIndexed ''ThreadData [('ThreadData,0)]
 
 PlutusTx.makeLift ''Action
-PlutusTx.makeIsDataIndexed ''Action [('Mint,0),('Burn,1)]
+PlutusTx.makeIsDataIndexed ''Action [('Main.Mint,0),('Burn,1)]
 
 
 contract :: AsContractError e => Contract () MintSchema e ()
